@@ -1,5 +1,7 @@
 const fs = require("fs");
 const crypto = require("crypto");
+const util = require("util");
+const scrypt = util.promisify(crypto.scrypt);
 
 class UsersRepository {
   constructor(filename) {
@@ -21,13 +23,39 @@ class UsersRepository {
     );
   }
   async create(attributes) {
+    //Assuming that  attributes === {email: '', password: ''}
     attributes.id = this.randomId();
 
+    const salt = crypto.randomBytes(8).toString("hex");
+    const hashed = await scrypt(attributes.password, salt, 64);
+
     const records = await this.getAll();
-    records.push(attributes);
+
+    //Overwriting text password with hashed version with salt (extra characters)
+    const record = {
+      ...attributes,
+      password: `${hashed.toString("hex")}.${salt}`,
+    };
+    records.push(record);
 
     await this.writeAll(records);
+
+    return record;
   }
+
+  async comparePasswords(saved, supplied) {
+    //Saved -> password saved in our database. 'hashed.salt'
+    //Supplied -> password given to us by a user trying sign in
+    // const result = saved.split(".");
+    // const hashed = result[0];
+    // const salt = result[1];
+    //Other way to write code. Destructuring result array
+    const [hashed, salt] = saved.split(".");
+    const hashedSupplied = await scrypt(supplied, salt, 64);
+
+    return hashed === hashedSupplied.toString("hex");
+  }
+
   //write the updated 'records' array back to this.filename
   async writeAll(records) {
     await fs.promises.writeFile(
